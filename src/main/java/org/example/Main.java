@@ -14,7 +14,7 @@ public class Main {
         Groot groot=new Groot(Path.of("."));
        groot.add(String.valueOf(Paths.get("sample.txt")));
        groot.add(String.valueOf(Paths.get("deepak.txt")));
-        groot.commit("Third commit");
-        groot.log();
+       groot.commit("Third commit");
+       groot.log();
         }
     }

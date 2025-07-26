@@ -1,7 +1,5 @@
 package org.example;
 import com.google.gson.*;
-
-
 import javax.sound.midi.SysexMessage;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -12,10 +10,7 @@ import java.io.File;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 import static com.sun.management.HotSpotDiagnosticMXBean.ThreadDumpFormat.JSON;
 
@@ -60,7 +55,6 @@ public class Groot {
         }
 
     }
-
     public String hashObject(String content) throws NoSuchAlgorithmException {
         byte[] bytes = MessageDigest.getInstance("SHA-1").digest(content.getBytes());
         StringBuilder hexstring = new StringBuilder();
@@ -78,39 +72,46 @@ public class Groot {
             throw new RuntimeException(e);
         }
         Path newFileHashedObjectPath = Paths.get(String.valueOf(this.objectsPath), fileHash);
-        try {
-            Files.write(newFileHashedObjectPath,
-                    fileHash.getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.TRUNCATE_EXISTING,
-                    StandardOpenOption.WRITE
-            );
-        } catch (Exception e) {
-
+        if(!Files.exists(newFileHashedObjectPath))
+        {
             Files.write(newFileHashedObjectPath,
                     fileHash.getBytes(StandardCharsets.UTF_8),
                     StandardOpenOption.CREATE_NEW,
                     StandardOpenOption.WRITE
             );
-
         }
-
         System.out.println("Added");
         this.updateStagingArea((fileToBeAdded), fileHash);
-
     }
-
     public void updateStagingArea(String filePath, String fileHash) throws IOException {
         String content = Files.readString(this.indexPath);
-        Gson gson = new Gson();
-        JsonArray index = gson.fromJson(content, JsonArray.class);
-        JsonObject newFile = new JsonObject();
-        newFile.addProperty("path", filePath);
-        newFile.addProperty("hash", fileHash);
-        index.add(newFile);
-        Files.writeString(indexPath, gson.toJson(index), StandardOpenOption.TRUNCATE_EXISTING);
-
+        JsonArray cleanIndex = new JsonArray();
+        if (content.equals("[]")) {
+            JsonObject jsonObject = new JsonObject();
+            jsonObject.addProperty("path", filePath);
+            jsonObject.addProperty("hash", fileHash);
+            cleanIndex.add(jsonObject);
+        }
+        else {
+            Gson gson = new Gson();
+            JsonArray indexArray = gson.fromJson(content, JsonArray.class);
+            Map<String, String> indexMap = new LinkedHashMap<>();
+            for (JsonElement element : indexArray) {
+                JsonObject jsonObject = element.getAsJsonObject();
+                String path = jsonObject.get("path").getAsString();
+                String hash = jsonObject.get("hash").getAsString();
+                indexMap.put(path, hash);
+            }
+            indexMap.put(filePath,fileHash);
+            for (Map.Entry<String,String> entry : indexMap.entrySet()) {
+                JsonObject jsonObject = new JsonObject();
+                jsonObject.addProperty("path", entry.getKey());
+                jsonObject.addProperty("hash", entry.getValue());
+                cleanIndex.add(jsonObject);
+            }
+        }
+        Files.writeString(indexPath, cleanIndex.toString(),StandardOpenOption.TRUNCATE_EXISTING,StandardOpenOption.WRITE);
     }
-
     public void commit(String message) throws IOException, NoSuchAlgorithmException {
         String content = Files.readString(this.indexPath);
         Gson gson = new Gson();
@@ -121,7 +122,6 @@ public class Groot {
         commitData.put("message", message);
         commitData.put("files", index.toString());
         commitData.put("parent", parentCommit);
-
         String commitHash = this.hashObject(commitData.toString());
         Path commitPath = Paths.get(String.valueOf(this.objectsPath), commitHash);
         String commitDataString = gson.toJson(commitData);
@@ -130,14 +130,13 @@ public class Groot {
                 StandardOpenOption.WRITE);
         Files.write(this.headPath, commitHash.getBytes(StandardCharsets.UTF_8), StandardOpenOption.TRUNCATE_EXISTING,
                 StandardOpenOption.WRITE);
-
         Files.write(
                 this.indexPath
                 , "[]".getBytes(StandardCharsets.UTF_8)
                 , StandardOpenOption.TRUNCATE_EXISTING
                 , StandardOpenOption.WRITE
         );
-        System.out.print("commit successful");
+        System.out.println("commit successful");
         this.showCommitDiff(commitHash);
     }
 
@@ -159,8 +158,10 @@ public class Groot {
                 JsonObject jsonObject = JsonParser.parseString(commitData).getAsJsonObject();
                 String parent = jsonObject.get("parent").getAsString();
                 String timestamp=jsonObject.get("timeStamp").getAsString();
-                System.out.println("parent :"+parent);
-                System.out.println("timeStamp: "+timestamp);
+                String message=jsonObject.get("message").getAsString();
+                System.out.println("parent : "+parent);
+                System.out.println("timeStamp : "+timestamp);
+                System.out.println("message : "+message);
                 System.out.println("-------------------------------------------------");
                 currentCommitHash=parent;
         }
@@ -177,21 +178,32 @@ public class Groot {
             JsonObject fileObj = element.getAsJsonObject();
             String path = fileObj.get("path").getAsString();
             String hash = fileObj.get("hash").getAsString();
-
             String content = this.getFileContent(hash);
-            System.out.println("content" + content);
             if (parent != null) {
                 String parentCommitData = this.getCommitData(parent);
                 String getParentFileContent=this.getParentFileContent(parentCommitData, Path.of(path));
+
+                System.out.println("-------------"+content);
+                System.out.println(getParentFileContent);
             }
         }
 
     }
-    public String getParentFileContent(String parentCommitData,Path path)
-    {
+    public String getParentFileContent(String parentCommitData,Path filePath) throws IOException {
         JsonObject jsonObject=JsonParser.parseString(parentCommitData).getAsJsonObject();
-        String parentPath=jsonObject.get("path").getAsString();
+        String files=jsonObject.get("files").getAsString();
+        JsonArray filesArray=JsonParser.parseString(files).getAsJsonArray();
+        for(JsonElement element:filesArray) {
+            JsonObject fileObj = element.getAsJsonObject();
+            String path=fileObj.get("path").getAsString();
+            if(path.equals(filePath)) {
+                String hash = fileObj.get("hash").getAsString();
+                String content=this.getFileContent(hash);
+                return content;
+            }
 
+        }
+        return null;
     }
     public String getCommitData(String commitHash){
         Path commitPath=Paths.get(String.valueOf(this.objectsPath),commitHash);
@@ -207,7 +219,6 @@ public class Groot {
         Path objectpath=Paths.get(String.valueOf(this.objectsPath),filehash);
         return Files.readString(objectpath);
     }
-
 }
 
 
