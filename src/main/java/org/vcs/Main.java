@@ -1,7 +1,5 @@
-package org.example;
+package org.vcs;
 
-
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
